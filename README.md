@@ -1,10 +1,10 @@
-# Dashingest — Databricks Library
+# DashIngest — Databricks Library
 
-[![CI](https://github.com/darshan-innovation/dash-ingest/actions/workflows/ci.yml/badge.svg)](https://github.com/darshan-innovation/dash-ingest/actions)
+[![CI](https://github.com/dash-libs/dash-ingest/actions/workflows/ci.yml/badge.svg)](https://github.com/dash-libs/dash-ingest/actions)
 [![PyPI](https://img.shields.io/pypi/v/dash-ingest)](https://pypi.org/project/dash-ingest/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-Part of the **[Dashlibs](https://github.com/darshan-innovation)** suite — Databricks libraries built for business users.
+Part of the **[Dashlibs](https://github.com/dash-libs)** suite — Databricks libraries built for business users.
 
 ## Installation
 
@@ -28,7 +28,7 @@ dashingest.launch()   # Opens interactive UI in your Databricks notebook
 | dash-ml | ML Model Monitoring |
 | dash-ingest | Data Ingestion |
 | dash-gov | Data Governance |
-| dash-relate | Ontology & Lineage for AI |
+| dash-ontology | Ontology & Lineage for AI |
 
 ## License
 
