@@ -2,6 +2,24 @@
 fill a few plain fields, run. No hand-written URIs or JDBC strings."""
 from __future__ import annotations
 
+_LIBRARY = "dashingest"
+
+
+def env_setup() -> None:
+    """Open the environment setup panel — where should dashingest read/write
+    its configs? Defaults to the notebook's current working directory if
+    never called."""
+    try:
+        import dashui
+        from IPython.display import display
+    except ImportError:
+        raise RuntimeError("ipywidgets required. Run: %pip install ipywidgets") from None
+
+    display(dashui.card([
+        dashui.header("DashIngest — Environment Setup", library=_LIBRARY),
+        dashui.env_setup_panel(_LIBRARY).widget,
+    ]))
+
 
 def launch():
     try:
@@ -262,12 +280,82 @@ def launch():
             cursor_json_path=api_cursor_json_path.value.strip(),
         )
 
+    # ── Config persistence — structural fields only, never passwords/tokens ──
+    def _collect_state() -> dict:
+        return {
+            "kind": kind_toggle.value,
+            "format": file_format.value,
+            "volume": {"catalog": vol_catalog.value, "schema": vol_schema.value, "volume": vol_volume.value, "path": vol_path.value},
+            "adls": {"account": adls_account.value, "container": adls_container.value, "path": adls_path.value},
+            "s3": {"bucket": s3_bucket.value, "path": s3_path.value},
+            "dbfs": {"path": dbfs_path.value},
+            "database": {
+                "engine": db_engine.value, "host": db_host.value, "database": db_database.value,
+                "port": db_port.value, "table": db_table.value, "query": db_query.value, "user": db_user.value,
+                "ssl": db_ssl.value,
+            },
+            "rest_api": {"url": api_url.value, "json_path": api_json_path.value, "auth_type": api_auth_type.value, "pagination": api_pagination.value},
+            "csv": {"delimiter": csv_delimiter.value, "header": csv_header.value, "null_value": csv_null_value.value},
+            "excel": {"sheet": xl_sheet.value, "header_row": xl_header_row.value, "header": xl_header.value},
+            "target": {
+                "table": target_table.value, "write_mode": write_mode.value,
+                "merge_keys": merge_keys.value, "schema_evolution": schema_evo.value,
+            },
+        }
+
+    def _apply_state(state: dict) -> None:
+        if not state:
+            return
+        kind_toggle.value = state.get("kind", kind_toggle.value)
+        file_format.value = state.get("format", file_format.value)
+        v = state.get("volume", {})
+        vol_catalog.value, vol_schema.value, vol_volume.value, vol_path.value = (
+            v.get("catalog", ""), v.get("schema", ""), v.get("volume", ""), v.get("path", ""))
+        a = state.get("adls", {})
+        adls_account.value, adls_container.value, adls_path.value = (
+            a.get("account", ""), a.get("container", ""), a.get("path", ""))
+        s3 = state.get("s3", {})
+        s3_bucket.value, s3_path.value = s3.get("bucket", ""), s3.get("path", "")
+        dbfs_path.value = state.get("dbfs", {}).get("path", "")
+        d = state.get("database", {})
+        db_engine.value = d.get("engine", db_engine.value)
+        db_host.value, db_database.value, db_port.value = d.get("host", ""), d.get("database", ""), d.get("port", "")
+        db_table.value, db_query.value, db_user.value = d.get("table", ""), d.get("query", ""), d.get("user", "")
+        db_ssl.value = d.get("ssl", False)
+        r = state.get("rest_api", {})
+        api_url.value, api_json_path.value = r.get("url", ""), r.get("json_path", "")
+        api_auth_type.value = r.get("auth_type", api_auth_type.value)
+        api_pagination.value = r.get("pagination", api_pagination.value)
+        c = state.get("csv", {})
+        csv_delimiter.value = c.get("delimiter", ",")
+        csv_header.value = c.get("header", True)
+        csv_null_value.value = c.get("null_value", "")
+        e = state.get("excel", {})
+        xl_sheet.value = e.get("sheet", "0")
+        xl_header_row.value = e.get("header_row", 0)
+        xl_header.value = e.get("header", True)
+        t = state.get("target", {})
+        target_table.value = t.get("table", "")
+        write_mode.value = t.get("write_mode", write_mode.value)
+        merge_keys.value = t.get("merge_keys", "")
+        schema_evo.value = t.get("schema_evolution", True)
+
+    def _save_state() -> None:
+        try:
+            dashui.save_config(_LIBRARY, _collect_state())
+        except Exception:
+            pass  # persistence is a convenience, never block the actual operation on it
+
+    _apply_state(dashui.load_config(_LIBRARY))
+
     def on_test(b):
         with output:
             output.clear_output()
             try:
                 from dashingest.ingestor import test_connection
-                test_connection(_build_source()).display()
+                source = _build_source()
+                _save_state()
+                test_connection(source).display()
             except Exception as e:
                 print(f"Error: {e}")
 
@@ -276,7 +364,9 @@ def launch():
             output.clear_output()
             try:
                 from dashingest.ingestor import preview
-                print(preview(_build_source(), limit=10))
+                source = _build_source()
+                _save_state()
+                print(preview(source, limit=10))
             except Exception as e:
                 print(f"Error: {e}")
 
@@ -293,7 +383,9 @@ def launch():
                     schema_evolution=schema_evo.value,
                     merge_keys=[k.strip() for k in merge_keys.value.split(",") if k.strip()],
                 )
-                result = run_ingestion(_build_source(), target)
+                source = _build_source()
+                _save_state()
+                result = run_ingestion(source, target)
                 result.display()
             except Exception as e:
                 print(f"Error: {e}")
@@ -302,8 +394,13 @@ def launch():
     preview_btn.on_click(on_preview)
     run_btn.on_click(on_run)
 
+    env_accordion = w.Accordion(children=[dashui.env_setup_panel(_LIBRARY).widget])
+    env_accordion.set_title(0, "Environment setup")
+    env_accordion.selected_index = None
+
     ui = dashui.card([
         dashui.header("DashIngest — Data Ingestion", library="dashingest"),
+        env_accordion,
         dashui.section("Step 1: Source"),
         kind_toggle, source_panel, format_row,
         w.HBox([test_btn, preview_btn]),

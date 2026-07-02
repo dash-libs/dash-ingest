@@ -22,7 +22,7 @@ from dashingest.readers import (
     ParquetReaderOptions,
     TextReaderOptions,
 )
-from dashingest.ui import launch
+from dashingest.ui import env_setup, launch
 
 __version__ = "0.1.1"
 __all__ = [
@@ -43,6 +43,7 @@ __all__ = [
     "TextReaderOptions",
     "VolumeSource",
     "build_jdbc_url",
+    "env_setup",
     "infer_format_from_path",
     "launch",
     "preview",
