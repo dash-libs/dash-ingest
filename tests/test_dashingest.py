@@ -1,5 +1,4 @@
-"""Unit tests for Ingestor (no Spark required)."""
-import pytest
+"""Package-level smoke tests (no Spark required)."""
 
 
 def test_import():
@@ -12,6 +11,6 @@ def test_launch_importable():
     assert callable(launch)
 
 
-def test_main_class_importable():
-    from dashingest import Ingestor
-    assert Ingestor is not None
+def test_run_ingestion_importable():
+    from dashingest import run_ingestion
+    assert callable(run_ingestion)

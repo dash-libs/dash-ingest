@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "dash-ingest"
 dynamic = ["version"]
-description = "Easy data ingestion connectors for Databricks — with a built-in notebook UI"
+description = "ADF-style data ingestion for Databricks — pick a source (Volume, ADLS, S3, Database, REST API), fill a few fields, run"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Darshan Shah", email = "darshan.innovation@gmail.com" }]
-keywords = ["databricks", "ingestion", "etl", "pyspark", "delta"]
+keywords = ["databricks", "ingestion", "etl", "pyspark", "delta", "adls", "jdbc"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -23,7 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["ipywidgets>=8.0"]
+dependencies = ["ipywidgets>=8.0", "dash-uis==0.2.1", "requests>=2.28"]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "hatch", "pdoc", "ruff"]

@@ -1,6 +1,52 @@
-"""DashIngest — Easy data ingestion connectors for Databricks."""
-from dashingest.ingestor import Ingestor
+"""DashIngest — ADF-style data ingestion for Databricks: pick a source kind
+(Volume, ADLS, S3, DBFS, Database, REST API), fill a few plain fields, run."""
+from dashingest.connectors import (
+    ADLSSource,
+    DatabaseSource,
+    DBFSSource,
+    IngestTarget,
+    RestApiSource,
+    S3Source,
+    VolumeSource,
+    build_jdbc_url,
+    infer_format_from_path,
+    resolve_path,
+)
+from dashingest.ingestor import ConnectionTestResult, IngestResult, preview, run_ingestion, test_connection
+from dashingest.readers import (
+    AvroReaderOptions,
+    CsvReaderOptions,
+    ExcelReaderOptions,
+    JsonReaderOptions,
+    OrcReaderOptions,
+    ParquetReaderOptions,
+    TextReaderOptions,
+)
 from dashingest.ui import launch
 
 __version__ = "0.1.0"
-__all__ = ["Ingestor", "launch"]
+__all__ = [
+    "ADLSSource",
+    "AvroReaderOptions",
+    "ConnectionTestResult",
+    "CsvReaderOptions",
+    "DBFSSource",
+    "DatabaseSource",
+    "ExcelReaderOptions",
+    "IngestResult",
+    "IngestTarget",
+    "JsonReaderOptions",
+    "OrcReaderOptions",
+    "ParquetReaderOptions",
+    "RestApiSource",
+    "S3Source",
+    "TextReaderOptions",
+    "VolumeSource",
+    "build_jdbc_url",
+    "infer_format_from_path",
+    "launch",
+    "preview",
+    "resolve_path",
+    "run_ingestion",
+    "test_connection",
+]

@@ -245,10 +245,10 @@ jobs:
           {
             "listing_name": "DashIngest — Data Ingestion",
             "version": "${VERSION}",
-            "short_description": "Ingest CSV, JSON, Parquet and JDBC sources into Delta tables",
-            "long_description": "DashIngest — Data Ingestion provides an ipywidgets UI inside Databricks notebooks to ingest CSV, JSON, Parquet and JDBC sources into Delta tables. No coding required for business users.",
+            "short_description": "ADF-style ingestion from Volumes, ADLS, S3, databases and REST APIs into Delta tables",
+            "long_description": "DashIngest provides an ipywidgets UI inside Databricks notebooks to ingest data from Databricks Volumes, ADLS Gen2, Amazon S3, DBFS, relational databases, and REST APIs into Delta tables. No coding required for business users.",
             "categories": ["Data Engineering,ETL"],
-            "tags": ["ingestion", "etl", "databricks", "unity-catalog", "pyspark", "delta"],
+            "tags": ["ingestion", "etl", "databricks", "unity-catalog", "pyspark", "jdbc"],
             "provider": "dash-libs",
             "documentation_url": "https://github.com/dash-libs/dash-ingest",
             "source_url": "https://github.com/dash-libs/dash-ingest",
