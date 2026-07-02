@@ -71,6 +71,7 @@ jobs:
     needs: [test, docs]
     permissions:
       contents: write
+      pull-requests: write
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
@@ -135,16 +136,33 @@ jobs:
           \`\`\`
           EOF
 
-      - name: Commit version bump + docs
+      - name: Commit version bump + docs to a release branch
         env:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git push origin --delete "refs/tags/v${VERSION}" 2>/dev/null || true
+          git push origin --delete "release/v${VERSION}" 2>/dev/null || true
+          git tag -d "v${VERSION}" 2>/dev/null || true
+          git checkout -b "release/v${VERSION}"
           git add .
           git commit -m "release: v${VERSION} — tests passed, docs updated"
           git tag "v${VERSION}"
-          git push origin HEAD --tags
+          git push origin "release/v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Open and auto-merge release PR
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh pr create --base main --head "release/v${VERSION}" \
+            --title "release: v${VERSION}" \
+            --body "Automated release PR — tests passed, docs regenerated, version bumped to v${VERSION}." \
+            2>/dev/null || true
+          gh pr merge "release/v${VERSION}" --merge --admin --delete-branch
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -205,10 +223,10 @@ jobs:
           cp dist/*.whl marketplace-bundle/files/
 
           # Generate companion notebook
-          cat > marketplace-bundle/files/DashIngest — Data Ingestion_Quickstart.py << NBEOF
+          cat > marketplace-bundle/files/DashIngest_Quickstart.py << NBEOF
           # Databricks notebook source
           # MAGIC %md
-          # MAGIC # DashIngest — Data Ingestion v${VERSION} — Data Quality for Databricks
+          # MAGIC # DashIngest — Data Ingestion v${VERSION} for Databricks
           # MAGIC Install and launch the interactive UI.
 
           # COMMAND ----------
@@ -225,12 +243,12 @@ jobs:
           # Generate listing metadata
           cat > marketplace-bundle/listing.json << LEOF
           {
-            "listing_name": "DashIngest — Data Ingestion — Data Quality",
+            "listing_name": "DashIngest — Data Ingestion",
             "version": "${VERSION}",
             "short_description": "Ingest CSV, JSON, Parquet and JDBC sources into Delta tables",
-            "long_description": "DashIngest — Data Ingestion provides an ipywidgets UI inside Databricks notebooks to run data quality checks on DataFrames, Unity Catalog tables, and SQL queries. No coding required for business users.",
+            "long_description": "DashIngest — Data Ingestion provides an ipywidgets UI inside Databricks notebooks to ingest CSV, JSON, Parquet and JDBC sources into Delta tables. No coding required for business users.",
             "categories": ["Data Engineering,ETL"],
-            "tags": ["data-quality", "databricks", "unity-catalog", "pyspark"],
+            "tags": ["ingestion", "etl", "databricks", "unity-catalog", "pyspark", "delta"],
             "provider": "dash-libs",
             "documentation_url": "https://github.com/dash-libs/dash-ingest",
             "source_url": "https://github.com/dash-libs/dash-ingest",
