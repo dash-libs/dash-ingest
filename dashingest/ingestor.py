@@ -25,7 +25,7 @@ class IngestResult:
     write_mode: str
 
     def display(self) -> None:
-        print(f"✅ Ingested into {self.table} ({self.write_mode}): {self.row_count:,} total rows")
+        print(f"Ingested into {self.table} ({self.write_mode}): {self.row_count:,} total rows")
 
 
 @dataclass
@@ -34,7 +34,7 @@ class ConnectionTestResult:
     message: str
 
     def display(self) -> None:
-        print(f"{'✅' if self.ok else '❌'} {self.message}")
+        print(f"{'OK' if self.ok else 'Error'} — {self.message}")
 
 
 def run_ingestion(source, target: IngestTarget) -> IngestResult:

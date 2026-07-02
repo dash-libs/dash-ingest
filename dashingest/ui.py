@@ -189,7 +189,7 @@ def launch():
 
     test_btn = dashui.action_button("Test Connection", style="info")
     preview_btn = dashui.action_button("Preview", style="info")
-    run_btn = dashui.action_button("Run Ingestion", style="success", emoji="▶")
+    run_btn = dashui.action_button("Run Ingestion", style="success")
     output = dashui.output_panel()
 
     def _build_reader_options(fmt):
@@ -269,7 +269,7 @@ def launch():
                 from dashingest.ingestor import test_connection
                 test_connection(_build_source()).display()
             except Exception as e:
-                print(f"❌ {e}")
+                print(f"Error: {e}")
 
     def on_preview(b):
         with output:
@@ -278,7 +278,7 @@ def launch():
                 from dashingest.ingestor import preview
                 print(preview(_build_source(), limit=10))
             except Exception as e:
-                print(f"❌ {e}")
+                print(f"Error: {e}")
 
     def on_run(b):
         with output:
@@ -296,14 +296,14 @@ def launch():
                 result = run_ingestion(_build_source(), target)
                 result.display()
             except Exception as e:
-                print(f"❌ {e}")
+                print(f"Error: {e}")
 
     test_btn.on_click(on_test)
     preview_btn.on_click(on_preview)
     run_btn.on_click(on_run)
 
     ui = dashui.card([
-        dashui.header("DashIngest — Data Ingestion", library="dashingest", emoji="📥"),
+        dashui.header("DashIngest — Data Ingestion", library="dashingest"),
         dashui.section("Step 1: Source"),
         kind_toggle, source_panel, format_row,
         w.HBox([test_btn, preview_btn]),
