@@ -12,7 +12,7 @@ from dashingest.connectors import (
     infer_format_from_path,
     resolve_path,
 )
-from dashingest.ingestor import IngestResult, run_ingestion
+from dashingest.ingestor import ConnectionTestResult, IngestResult, preview, run_ingestion, test_connection
 from dashingest.readers import (
     AvroReaderOptions,
     CsvReaderOptions,
@@ -28,6 +28,7 @@ __version__ = "0.1.0"
 __all__ = [
     "ADLSSource",
     "AvroReaderOptions",
+    "ConnectionTestResult",
     "CsvReaderOptions",
     "DBFSSource",
     "DatabaseSource",
@@ -44,6 +45,8 @@ __all__ = [
     "build_jdbc_url",
     "infer_format_from_path",
     "launch",
+    "preview",
     "resolve_path",
     "run_ingestion",
+    "test_connection",
 ]

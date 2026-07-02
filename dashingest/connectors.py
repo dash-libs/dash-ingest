@@ -77,6 +77,12 @@ class DatabaseSource:
     Set `engine` + `host` + `database` for a known engine (builds the JDBC
     URL/driver for you), or set `url`/`driver` directly for anything else.
     Set exactly one of `table` or `query`.
+
+    Advanced (all optional): `fetch_size` batches network round-trips;
+    `num_partitions` + `partition_column` + `lower_bound` + `upper_bound`
+    split a large table into parallel reads (all four must be set together);
+    `ssl` sets the common per-engine SSL flag; `connection_properties` is a
+    raw escape hatch for anything else the JDBC driver accepts.
     """
     host: str = ""
     database: str = ""
@@ -88,16 +94,48 @@ class DatabaseSource:
     password: str = ""
     url: str = ""       # overrides the engine preset if set
     driver: str = ""    # overrides the engine preset if set
+    fetch_size: int | None = None
+    num_partitions: int | None = None
+    partition_column: str = ""
+    lower_bound: int | None = None
+    upper_bound: int | None = None
+    ssl: bool = False
+    connection_properties: dict = field(default_factory=dict)
+
+    @property
+    def is_partitioned(self) -> bool:
+        return bool(self.num_partitions and self.partition_column and self.lower_bound is not None and self.upper_bound is not None)
 
 
 @dataclass
 class RestApiSource:
     """A JSON REST API. `json_path` is a dot-path to the records array/dict
-    if the payload wraps it (e.g. "data.items"); leave empty for a bare array."""
+    if the payload wraps it (e.g. "data.items"); leave empty for a bare array.
+
+    Advanced (all optional): `auth_type` in none|bearer|api_key|basic sets
+    how credentials are attached. `pagination` in none|page_param|cursor
+    follows multiple pages automatically, up to `max_pages`.
+    """
     url: str
     headers: dict = field(default_factory=dict)
     params: dict = field(default_factory=dict)
     json_path: str = ""
+    timeout_seconds: int = 30
+
+    auth_type: str = "none"  # none | bearer | api_key | basic
+    bearer_token: str = ""
+    api_key_header: str = "X-API-Key"
+    api_key: str = ""
+    basic_user: str = ""
+    basic_password: str = ""
+
+    pagination: str = "none"  # none | page_param | cursor
+    page_param: str = "page"
+    page_size_param: str = ""
+    page_size: int = 0
+    max_pages: int = 20
+    cursor_param: str = "cursor"
+    cursor_json_path: str = ""  # dot-path in the response to the next page's cursor value
 
 
 @dataclass

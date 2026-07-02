@@ -48,16 +48,90 @@ def launch():
     db_query = w.Text(description="or Query:", placeholder="SELECT ... (instead of table)")
     db_user = w.Text(description="User:")
     db_password = w.Password(description="Password:")
+
+    db_ssl = w.Checkbox(value=False, description="Use SSL")
+    db_fetch_size = w.IntText(description="Fetch size:", value=0, layout=w.Layout(width="180px"))
+    db_num_partitions = w.IntText(description="Partitions:", value=0, layout=w.Layout(width="180px"))
+    db_partition_col = w.Text(description="Partition col:", placeholder="id")
+    db_lower_bound = w.IntText(description="Lower bound:", layout=w.Layout(width="180px"))
+    db_upper_bound = w.IntText(description="Upper bound:", layout=w.Layout(width="180px"))
+    db_props_table = dashui.editable_table(["Property", "Value"], placeholders={"Property": "sslmode", "Value": "require"})
+    db_advanced = w.Accordion(children=[w.VBox([
+        db_ssl,
+        w.HTML("<div style='font-size:12px;color:#5A6872;margin:6px 0 2px'>Parallel read (set all four to split a large table across partitions)</div>"),
+        w.HBox([db_num_partitions, db_partition_col]),
+        w.HBox([db_lower_bound, db_upper_bound]),
+        db_fetch_size,
+        w.HTML("<div style='font-size:12px;color:#5A6872;margin:6px 0 2px'>Extra JDBC connection properties</div>"),
+        db_props_table.widget,
+    ])])
+    db_advanced.set_title(0, "Advanced")
+    db_advanced.selected_index = None
+
     db_box = w.VBox([
         w.HBox([db_engine, db_host, db_port]),
         db_database, db_table, db_query,
         w.HBox([db_user, db_password]),
+        db_advanced,
     ])
 
     # ── REST API ─────────────────────────────────────────────────────────────
     api_url = w.Text(description="URL:", placeholder="https://api.example.com/records")
     api_json_path = w.Text(description="JSON path:", placeholder="data.items (optional)")
-    api_box = w.VBox([api_url, api_json_path])
+
+    api_auth_type = w.Dropdown(options=["none", "bearer", "api_key", "basic"], description="Auth:")
+    api_bearer_token = w.Password(description="Token:", disabled=True)
+    api_key_header = w.Text(description="Header name:", value="X-API-Key", disabled=True)
+    api_key_value = w.Password(description="Key:", disabled=True)
+    api_basic_user = w.Text(description="User:", disabled=True)
+    api_basic_password = w.Password(description="Password:", disabled=True)
+    api_auth_box = w.VBox([api_bearer_token])
+
+    def on_auth_type_change(change):
+        api_auth_box.children = {
+            "bearer": [api_bearer_token],
+            "api_key": [api_key_header, api_key_value],
+            "basic": [api_basic_user, api_basic_password],
+        }.get(change["new"], [])
+
+    api_auth_type.observe(on_auth_type_change, names="value")
+
+    api_pagination = w.Dropdown(options=["none", "page_param", "cursor"], description="Pagination:")
+    api_page_param = w.Text(description="Page param:", value="page", disabled=True)
+    api_max_pages = w.IntText(description="Max pages:", value=20, disabled=True)
+    api_cursor_param = w.Text(description="Cursor param:", value="cursor", disabled=True)
+    api_cursor_json_path = w.Text(description="Cursor JSON path:", placeholder="meta.next_cursor", disabled=True)
+    api_pagination_box = w.VBox([])
+
+    def on_pagination_change(change):
+        for field in (api_page_param, api_max_pages, api_cursor_param, api_cursor_json_path):
+            field.disabled = True
+        if change["new"] == "page_param":
+            api_page_param.disabled = api_max_pages.disabled = False
+            api_pagination_box.children = [api_page_param, api_max_pages]
+        elif change["new"] == "cursor":
+            api_cursor_param.disabled = api_cursor_json_path.disabled = api_max_pages.disabled = False
+            api_pagination_box.children = [api_cursor_param, api_cursor_json_path, api_max_pages]
+        else:
+            api_pagination_box.children = []
+
+    api_pagination.observe(on_pagination_change, names="value")
+
+    api_headers_table = dashui.editable_table(["Header", "Value"], placeholders={"Header": "Accept", "Value": "application/json"})
+    api_params_table = dashui.editable_table(["Param", "Value"])
+
+    api_advanced = w.Accordion(children=[w.VBox([
+        api_auth_type, api_auth_box,
+        api_pagination, api_pagination_box,
+        w.HTML("<div style='font-size:12px;color:#5A6872;margin:6px 0 2px'>Headers</div>"),
+        api_headers_table.widget,
+        w.HTML("<div style='font-size:12px;color:#5A6872;margin:6px 0 2px'>Query params</div>"),
+        api_params_table.widget,
+    ])])
+    api_advanced.set_title(0, "Advanced")
+    api_advanced.selected_index = None
+
+    api_box = w.VBox([api_url, api_json_path, api_advanced])
 
     # ── File format (path-based sources only) ───────────────────────────────
     file_format = w.Dropdown(
@@ -65,7 +139,6 @@ def launch():
         description="Format:",
     )
 
-    # CSV options
     csv_delimiter = w.Text(description="Delimiter:", value=",")
     csv_header = w.Checkbox(value=True, description="Has header row")
     csv_null_value = w.Text(description="Null marker:", placeholder="e.g. NA (optional)")
@@ -114,6 +187,8 @@ def launch():
     schema_evo = w.Checkbox(value=True, description="Allow schema evolution")
     write_mode.observe(lambda c: setattr(merge_keys, "disabled", c["new"] != "merge"), names="value")
 
+    test_btn = dashui.action_button("Test Connection", style="info")
+    preview_btn = dashui.action_button("Preview", style="info")
     run_btn = dashui.action_button("Run Ingestion", style="success", emoji="▶")
     output = dashui.output_panel()
 
@@ -156,12 +231,54 @@ def launch():
             return DBFSSource(dbfs_path.value.strip(), fmt, reader_opts)
         if kind == "Database":
             port = int(db_port.value.strip()) if db_port.value.strip() else None
+            props = {r["Property"]: r["Value"] for r in db_props_table.values()}
             return DatabaseSource(
                 host=db_host.value.strip(), database=db_database.value.strip(), engine=db_engine.value,
                 port=port, table=db_table.value.strip(), query=db_query.value.strip(),
                 user=db_user.value.strip(), password=db_password.value,
+                ssl=db_ssl.value,
+                fetch_size=db_fetch_size.value or None,
+                num_partitions=db_num_partitions.value or None,
+                partition_column=db_partition_col.value.strip(),
+                lower_bound=db_lower_bound.value if db_num_partitions.value else None,
+                upper_bound=db_upper_bound.value if db_num_partitions.value else None,
+                connection_properties=props,
             )
-        return RestApiSource(api_url.value.strip(), json_path=api_json_path.value.strip())
+
+        headers = {r["Header"]: r["Value"] for r in api_headers_table.values()}
+        params = {r["Param"]: r["Value"] for r in api_params_table.values()}
+        return RestApiSource(
+            api_url.value.strip(), headers=headers, params=params, json_path=api_json_path.value.strip(),
+            auth_type=api_auth_type.value,
+            bearer_token=api_bearer_token.value,
+            api_key_header=api_key_header.value.strip() or "X-API-Key",
+            api_key=api_key_value.value,
+            basic_user=api_basic_user.value.strip(),
+            basic_password=api_basic_password.value,
+            pagination=api_pagination.value,
+            page_param=api_page_param.value.strip() or "page",
+            max_pages=api_max_pages.value or 20,
+            cursor_param=api_cursor_param.value.strip() or "cursor",
+            cursor_json_path=api_cursor_json_path.value.strip(),
+        )
+
+    def on_test(b):
+        with output:
+            output.clear_output()
+            try:
+                from dashingest.ingestor import test_connection
+                test_connection(_build_source()).display()
+            except Exception as e:
+                print(f"❌ {e}")
+
+    def on_preview(b):
+        with output:
+            output.clear_output()
+            try:
+                from dashingest.ingestor import preview
+                print(preview(_build_source(), limit=10))
+            except Exception as e:
+                print(f"❌ {e}")
 
     def on_run(b):
         with output:
@@ -181,12 +298,15 @@ def launch():
             except Exception as e:
                 print(f"❌ {e}")
 
+    test_btn.on_click(on_test)
+    preview_btn.on_click(on_preview)
     run_btn.on_click(on_run)
 
     ui = dashui.card([
         dashui.header("DashIngest — Data Ingestion", library="dashingest", emoji="📥"),
         dashui.section("Step 1: Source"),
         kind_toggle, source_panel, format_row,
+        w.HBox([test_btn, preview_btn]),
         dashui.section("Step 2: Target"),
         target_table, write_mode, merge_keys, schema_evo,
         dashui.section("Step 3: Run"),
