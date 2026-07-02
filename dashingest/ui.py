@@ -65,8 +65,32 @@ def launch():
         description="Format:",
     )
 
+    # CSV options
+    csv_delimiter = w.Text(description="Delimiter:", value=",")
+    csv_header = w.Checkbox(value=True, description="Has header row")
+    csv_null_value = w.Text(description="Null marker:", placeholder="e.g. NA (optional)")
+    csv_box = w.VBox([w.HBox([csv_delimiter, csv_header]), csv_null_value])
+
+    # Excel options — the format that actually needs this much configuration
+    xl_sheet = w.Text(description="Sheet:", value="0", placeholder="name or 0-based index")
+    xl_header_row = w.IntText(description="Header row:", value=0, min=0)
+    xl_header = w.Checkbox(value=True, description="Has header row")
+    xl_password = w.Password(description="Password:", placeholder="if protected (optional)")
+    xl_sheets_to_union = w.Text(description="Union sheets:", placeholder="Jan, Feb, Mar (optional — reads+stacks multiple sheets)")
+    excel_box = w.VBox([
+        w.HBox([xl_sheet, xl_header_row, xl_header]),
+        xl_password, xl_sheets_to_union,
+    ])
+
+    format_options_panel = w.VBox([])
+
+    def on_format_change(change):
+        format_options_panel.children = {"csv": [csv_box], "excel": [excel_box]}.get(change["new"], [])
+
+    file_format.observe(on_format_change, names="value")
+
     source_panel = w.VBox([vol_box])
-    format_row = w.VBox([file_format])
+    format_row = w.VBox([file_format, format_options_panel])
 
     def on_kind_change(change):
         kind = change["new"]
@@ -78,7 +102,7 @@ def launch():
             "Database": [db_box],
             "REST API": [api_box],
         }[kind]
-        format_row.children = [] if kind in ("Database", "REST API") else [file_format]
+        format_row.children = [] if kind in ("Database", "REST API") else [file_format, format_options_panel]
 
     kind_toggle.observe(on_kind_change, names="value")
     on_kind_change({"new": kind_toggle.value})
@@ -93,21 +117,43 @@ def launch():
     run_btn = dashui.action_button("Run Ingestion", style="success", emoji="▶")
     output = dashui.output_panel()
 
+    def _build_reader_options(fmt):
+        from dashingest.readers import CsvReaderOptions, ExcelReaderOptions
+
+        if fmt == "csv":
+            return CsvReaderOptions(
+                delimiter=csv_delimiter.value or ",",
+                header=csv_header.value,
+                null_value=csv_null_value.value.strip(),
+            )
+        if fmt == "excel":
+            sheets = [s.strip() for s in xl_sheets_to_union.value.split(",") if s.strip()]
+            return ExcelReaderOptions(
+                sheet_name=xl_sheet.value.strip() or "0",
+                header_row=xl_header_row.value,
+                header=xl_header.value,
+                workbook_password=xl_password.value,
+                sheet_names=sheets,
+            )
+        return None
+
     def _build_source():
         from dashingest.connectors import ADLSSource, DatabaseSource, DBFSSource, RestApiSource, S3Source, VolumeSource
 
         kind = kind_toggle.value
         fmt = None if file_format.value == "(infer from path)" else file_format.value
+        reader_opts = _build_reader_options(fmt)
 
         if kind == "Databricks Volume":
             return VolumeSource(vol_catalog.value.strip(), vol_schema.value.strip(), vol_volume.value.strip(),
-                                 vol_path.value.strip(), fmt)
+                                 vol_path.value.strip(), fmt, reader_opts)
         if kind == "ADLS Gen2":
-            return ADLSSource(adls_account.value.strip(), adls_container.value.strip(), adls_path.value.strip(), fmt)
+            return ADLSSource(adls_account.value.strip(), adls_container.value.strip(), adls_path.value.strip(),
+                               fmt, reader_opts)
         if kind == "Amazon S3":
-            return S3Source(s3_bucket.value.strip(), s3_path.value.strip(), fmt)
+            return S3Source(s3_bucket.value.strip(), s3_path.value.strip(), fmt, reader_opts)
         if kind == "DBFS":
-            return DBFSSource(dbfs_path.value.strip(), fmt)
+            return DBFSSource(dbfs_path.value.strip(), fmt, reader_opts)
         if kind == "Database":
             port = int(db_port.value.strip()) if db_port.value.strip() else None
             return DatabaseSource(

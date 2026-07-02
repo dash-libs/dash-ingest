@@ -15,6 +15,7 @@ from dashingest.connectors import (
     resolve_format_and_options,
     resolve_path,
 )
+from dashingest.readers import ExcelReaderOptions, build_reader_options
 
 
 @dataclass
@@ -46,11 +47,32 @@ def _load(source, spark):
 
 
 def _load_path(source, spark):
-    file_format, options = resolve_format_and_options(source)
-    reader = spark.read.format(file_format)
+    if isinstance(source.reader_options, ExcelReaderOptions) and source.reader_options.sheet_names:
+        return _load_excel_sheets(source, spark)
+
+    spark_format, options = resolve_format_and_options(source)
+    reader = spark.read.format(spark_format)
     for key, value in options.items():
         reader = reader.option(key, value)
     return reader.load(resolve_path(source))
+
+
+def _load_excel_sheets(source, spark):
+    """Read several named sheets from the same workbook and union them —
+    for the common "one tab per month/region, same columns" spreadsheet shape."""
+    from functools import reduce
+
+    sheet_names = source.reader_options.sheet_names
+    path = resolve_path(source)
+    dfs = []
+    for sheet in sheet_names:
+        per_sheet_opts = ExcelReaderOptions(**{**vars(source.reader_options), "sheet_names": [], "sheet_name": sheet})
+        options = build_reader_options("excel", per_sheet_opts)
+        reader = spark.read.format("com.crealytics.spark.excel")
+        for key, value in options.items():
+            reader = reader.option(key, value)
+        dfs.append(reader.load(path))
+    return reduce(lambda left, right: left.unionByName(right), dfs)
 
 
 def _load_database(source: DatabaseSource, spark):

@@ -8,7 +8,9 @@ functions turn that into what Spark actually needs.
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any, Union
+
+from dashingest.readers import SPARK_FORMAT_FOR, build_reader_options, default_reader_options
 
 FILE_EXTENSIONS = {
     "csv": "csv", "tsv": "csv", "json": "json", "jsonl": "json",
@@ -25,7 +27,8 @@ class VolumeSource:
     volume: str
     path: str = ""
     file_format: str | None = None  # inferred from path extension if omitted
-    options: dict = field(default_factory=dict)
+    reader_options: Any = None      # a CsvReaderOptions/ExcelReaderOptions/... — defaults used if unset
+    options: dict = field(default_factory=dict)  # raw Spark options, applied on top of reader_options
 
 
 @dataclass
@@ -35,6 +38,7 @@ class ADLSSource:
     container: str
     path: str = ""
     file_format: str | None = None
+    reader_options: Any = None
     options: dict = field(default_factory=dict)
 
 
@@ -44,6 +48,7 @@ class S3Source:
     bucket: str
     path: str = ""
     file_format: str | None = None
+    reader_options: Any = None
     options: dict = field(default_factory=dict)
 
 
@@ -52,6 +57,7 @@ class DBFSSource:
     """Legacy DBFS mount or path — dbfs:/<path>."""
     path: str
     file_format: str | None = None
+    reader_options: Any = None
     options: dict = field(default_factory=dict)
 
 
@@ -110,19 +116,6 @@ def infer_format_from_path(path: str) -> str | None:
     return FILE_EXTENSIONS.get(ext)
 
 
-def default_format_options(file_format: str) -> dict:
-    """Sensible per-format defaults so most ingestions need zero extra options."""
-    return {
-        "csv": {"header": "true", "inferSchema": "true"},
-        "json": {"multiLine": "false"},
-        "excel": {"header": "true", "inferSchema": "true"},
-        "text": {},
-        "parquet": {},
-        "avro": {},
-        "orc": {},
-    }.get(file_format, {})
-
-
 def resolve_path(source: PathSource) -> str:
     if isinstance(source, VolumeSource):
         base = f"/Volumes/{source.catalog}/{source.schema_name}/{source.volume}"
@@ -140,13 +133,19 @@ def resolve_path(source: PathSource) -> str:
 
 
 def resolve_format_and_options(source: PathSource) -> tuple[str, dict]:
+    """Returns (spark_format, options) — spark_format is what goes into
+    spark.read.format(...) (e.g. "com.crealytics.spark.excel" for excel),
+    options is the fully-resolved option dict (reader_options translated to
+    real Spark keys, with source.options layered on top as raw overrides)."""
     file_format = source.file_format or infer_format_from_path(source.path)
     if not file_format:
         raise ValueError(
             f"Couldn't infer a file format from path {source.path!r} — set file_format explicitly."
         )
-    options = {**default_format_options(file_format), **source.options}
-    return file_format, options
+    spark_format = SPARK_FORMAT_FOR.get(file_format, file_format)
+    reader_opts = source.reader_options if source.reader_options is not None else default_reader_options(file_format)
+    options = {**build_reader_options(file_format, reader_opts), **source.options}
+    return spark_format, options
 
 
 def build_jdbc_url(source: DatabaseSource) -> str:

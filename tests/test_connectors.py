@@ -8,7 +8,6 @@ from dashingest.connectors import (
     S3Source,
     VolumeSource,
     build_jdbc_url,
-    default_format_options,
     infer_format_from_path,
     jdbc_driver,
     resolve_format_and_options,
@@ -91,8 +90,23 @@ def test_user_options_override_defaults():
     assert options["inferSchema"] == "true"  # untouched default survives
 
 
-def test_default_format_options_unknown_format_returns_empty():
-    assert default_format_options("nonexistent") == {}
+def test_excel_maps_to_spark_excel_format():
+    src = VolumeSource(catalog="c", schema_name="s", volume="v", path="report.xlsx")
+    spark_format, options = resolve_format_and_options(src)
+    assert spark_format == "com.crealytics.spark.excel"
+    assert options["dataAddress"] == "0!A1"
+
+
+def test_reader_options_flow_through_resolve_format_and_options():
+    from dashingest.readers import CsvReaderOptions
+
+    src = VolumeSource(
+        catalog="c", schema_name="s", volume="v", path="file.csv",
+        reader_options=CsvReaderOptions(delimiter=";", header=False),
+    )
+    _, options = resolve_format_and_options(src)
+    assert options["sep"] == ";"
+    assert options["header"] == "false"
 
 
 # ── JDBC ──────────────────────────────────────────────────────────────────
