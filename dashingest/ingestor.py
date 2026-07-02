@@ -1,88 +1,109 @@
+"""Runs an ingestion: source config -> Spark DataFrame -> Delta table.
+
+Spark/JDBC/REST touching — kept separate from connectors.py so the path/URL
+building logic there stays unit-testable without a SparkSession.
+"""
 from __future__ import annotations
-from typing import Optional
+from dataclasses import dataclass
+
+from dashingest.connectors import (
+    DatabaseSource,
+    IngestTarget,
+    RestApiSource,
+    build_jdbc_url,
+    jdbc_driver,
+    resolve_format_and_options,
+    resolve_path,
+)
 
 
-class Ingestor:
-    """
-    Load data from common sources into Databricks Delta tables.
+@dataclass
+class IngestResult:
+    table: str
+    row_count: int
+    write_mode: str
 
-    Usage::
-        ing = Ingestor()
-        ing.from_csv("abfss://container@account.dfs.core.windows.net/data/")
-        ing.to_table("catalog.schema.target")
-        ing.run()
-    """
+    def display(self) -> None:
+        print(f"✅ Ingested into {self.table} ({self.write_mode}): {self.row_count:,} total rows")
 
-    SUPPORTED_FORMATS = ["csv", "json", "parquet", "excel", "jdbc", "api"]
 
-    def __init__(self):
-        self._source_format: Optional[str] = None
-        self._source_path: Optional[str] = None
-        self._source_options: dict = {}
-        self._target_table: Optional[str] = None
-        self._write_mode: str = "append"
-        self._schema_evolution: bool = True
+def run_ingestion(source, target: IngestTarget) -> IngestResult:
+    from pyspark.sql import SparkSession
 
-    def from_csv(self, path: str, header: bool = True, infer_schema: bool = True):
-        self._source_format = "csv"
-        self._source_path = path
-        self._source_options = {"header": str(header), "inferSchema": str(infer_schema)}
-        return self
+    spark = SparkSession.getActiveSession()
+    df = _load(source, spark)
+    _write(df, target, spark)
+    count = spark.table(target.table).count()
+    return IngestResult(target.table, count, target.write_mode)
 
-    def from_json(self, path: str):
-        self._source_format = "json"
-        self._source_path = path
-        return self
 
-    def from_parquet(self, path: str):
-        self._source_format = "parquet"
-        self._source_path = path
-        return self
+def _load(source, spark):
+    if isinstance(source, DatabaseSource):
+        return _load_database(source, spark)
+    if isinstance(source, RestApiSource):
+        return _load_rest_api(source, spark)
+    return _load_path(source, spark)
 
-    def from_jdbc(self, url: str, table: str, user: str, password: str, driver: str = None):
-        self._source_format = "jdbc"
-        self._source_options = {"url": url, "dbtable": table,
-                                 "user": user, "password": password}
-        if driver:
-            self._source_options["driver"] = driver
-        return self
 
-    def to_table(self, table: str):
-        self._target_table = table
-        return self
+def _load_path(source, spark):
+    file_format, options = resolve_format_and_options(source)
+    reader = spark.read.format(file_format)
+    for key, value in options.items():
+        reader = reader.option(key, value)
+    return reader.load(resolve_path(source))
 
-    def mode(self, write_mode: str):
-        """append | overwrite | merge"""
-        self._write_mode = write_mode
-        return self
 
-    def with_schema_evolution(self, enabled: bool = True):
-        self._schema_evolution = enabled
-        return self
+def _load_database(source: DatabaseSource, spark):
+    if bool(source.table) == bool(source.query):
+        raise ValueError("Set exactly one of table or query on a DatabaseSource.")
+    reader = (
+        spark.read.format("jdbc")
+        .option("url", build_jdbc_url(source))
+        .option("driver", jdbc_driver(source))
+        .option("user", source.user)
+        .option("password", source.password)
+    )
+    reader = reader.option("query", source.query) if source.query else reader.option("dbtable", source.table)
+    return reader.load()
 
-    def run(self):
-        from pyspark.sql import SparkSession
-        spark = SparkSession.getActiveSession()
 
-        if not self._source_format:
-            raise ValueError("No source defined. Call from_csv(), from_json(), etc. first.")
-        if not self._target_table:
-            raise ValueError("No target defined. Call to_table() first.")
+def _load_rest_api(source: RestApiSource, spark):
+    import requests
 
-        reader = spark.read.format(self._source_format)
-        for k, v in self._source_options.items():
-            reader = reader.option(k, v)
+    response = requests.get(source.url, headers=source.headers, params=source.params)
+    response.raise_for_status()
+    data = response.json()
+    for key in filter(None, source.json_path.split(".")):
+        data = data[key]
+    if isinstance(data, dict):
+        data = [data]
+    return spark.createDataFrame(data)
 
-        df = reader.load(self._source_path) if self._source_path else reader.load()
 
-        writer = (
-            df.write.format("delta")
-              .mode("overwrite" if self._write_mode == "overwrite" else "append")
-        )
-        if self._schema_evolution:
-            writer = writer.option("mergeSchema", "true")
+def _write(df, target: IngestTarget, spark) -> None:
+    if target.write_mode == "merge":
+        _merge_write(df, target, spark)
+        return
 
-        writer.saveAsTable(self._target_table)
-        count = spark.table(self._target_table).count()
-        print(f"✅ Ingested to {self._target_table}: {count:,} total rows")
-        return df
+    writer = df.write.format("delta").mode(target.write_mode)
+    if target.schema_evolution:
+        writer = writer.option("mergeSchema", "true")
+    writer.saveAsTable(target.table)
+
+
+def _merge_write(df, target: IngestTarget, spark) -> None:
+    if not target.merge_keys:
+        raise ValueError("merge write mode requires merge_keys.")
+
+    from delta.tables import DeltaTable
+
+    if not spark.catalog.tableExists(target.table):
+        df.write.format("delta").saveAsTable(target.table)
+        return
+
+    delta_table = DeltaTable.forName(spark, target.table)
+    condition = " AND ".join(f"target.{key} = source.{key}" for key in target.merge_keys)
+    merge = delta_table.alias("target").merge(df.alias("source"), condition)
+    if target.schema_evolution and hasattr(merge, "withSchemaEvolution"):
+        merge = merge.withSchemaEvolution()  # Delta 3.1+; older runtimes just skip it
+    merge.whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
