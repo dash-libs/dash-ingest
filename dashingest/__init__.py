@@ -24,7 +24,7 @@ from dashingest.readers import (
 )
 from dashingest.ui import env_setup, launch
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __all__ = [
     "ADLSSource",
     "AvroReaderOptions",

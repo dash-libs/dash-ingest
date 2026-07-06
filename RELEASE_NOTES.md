@@ -1,7 +1,7 @@
-## DashIngest — Data Ingestion v0.1.1
+## DashIngest — Data Ingestion v0.1.2
 
-**Released:** 2026-07-02
-**Previous:** v0.1.0
+**Released:** 2026-07-06
+**Previous:** v0.1.1
 
 
 
@@ -12,12 +12,12 @@
 
 ### Install
 ```bash
-pip install dash-ingest==0.1.1
+pip install dash-ingest==0.1.2
 ```
 
 ### Quick Start (Databricks notebook)
 ```python
-%pip install dash-ingest==0.1.1
+%pip install dash-ingest==0.1.2
 import dashingest
 dashingest.launch()
 ```
