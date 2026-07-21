@@ -10,9 +10,10 @@ from dashingest.connectors import (
     VolumeSource,
     build_jdbc_url,
     infer_format_from_path,
+    parse_secret_ref,
     resolve_path,
 )
-from dashingest.ingestor import ConnectionTestResult, IngestResult, preview, run_ingestion, test_connection
+from dashingest.ingestor import ConnectionTestResult, IngestResult, preview, run_ingestion, test_connection, test_query
 from dashingest.readers import (
     AvroReaderOptions,
     CsvReaderOptions,
@@ -46,8 +47,10 @@ __all__ = [
     "env_setup",
     "infer_format_from_path",
     "launch",
+    "parse_secret_ref",
     "preview",
     "resolve_path",
     "run_ingestion",
     "test_connection",
+    "test_query",
 ]

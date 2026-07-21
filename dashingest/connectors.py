@@ -7,10 +7,24 @@ plain fields (storage account, container, host, database, ...); these
 functions turn that into what Spark actually needs.
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass, field
 from typing import Any, Union
 
 from dashingest.readers import SPARK_FORMAT_FOR, build_reader_options, default_reader_options
+
+_SECRET_REF = re.compile(r"^\{\{secrets/([^/]+)/([^}]+)\}\}$")
+
+
+def parse_secret_ref(value: str) -> tuple[str, str] | None:
+    """Parse a `{{secrets/scope/key}}` reference (Databricks' own Spark-conf
+    secret syntax) out of a credential field. Returns (scope, key), or None
+    if `value` isn't a secret reference — plain literals pass through
+    unchanged everywhere this is used."""
+    if not isinstance(value, str):
+        return None
+    m = _SECRET_REF.match(value.strip())
+    return (m.group(1), m.group(2)) if m else None
 
 FILE_EXTENSIONS = {
     "csv": "csv", "tsv": "csv", "json": "json", "jsonl": "json",
@@ -140,10 +154,18 @@ class RestApiSource:
 
 @dataclass
 class IngestTarget:
+    """`incremental=True` switches path-based sources (Volume/ADLS/S3/DBFS)
+    from a one-shot batch read to Databricks Auto Loader (`cloudFiles`) with
+    `trigger(availableNow=True)` — re-running only picks up files that
+    weren't already ingested, instead of re-reading and re-appending
+    everything. Requires `checkpoint_location`. Not supported for
+    Database/REST API sources or `write_mode="merge"`."""
     table: str
     write_mode: str = "append"  # append | overwrite | merge
     schema_evolution: bool = True
     merge_keys: list[str] = field(default_factory=list)
+    incremental: bool = False
+    checkpoint_location: str = ""  # Volume/DBFS path for Auto Loader's checkpoint + schema state
 
 
 PathSource = Union[VolumeSource, ADLSSource, S3Source, DBFSSource]
