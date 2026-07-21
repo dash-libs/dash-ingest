@@ -65,7 +65,7 @@ def launch():
     db_table = w.Text(description="Table:", placeholder="schema.table")
     db_query = w.Text(description="or Query:", placeholder="SELECT ... (instead of table)")
     db_user = w.Text(description="User:")
-    db_password = w.Password(description="Password:")
+    db_password = w.Password(description="Password:", placeholder="or {{secrets/scope/key}}")
 
     db_ssl = w.Checkbox(value=False, description="Use SSL")
     db_fetch_size = w.IntText(description="Fetch size:", value=0, layout=w.Layout(width="180px"))
@@ -98,11 +98,11 @@ def launch():
     api_json_path = w.Text(description="JSON path:", placeholder="data.items (optional)")
 
     api_auth_type = w.Dropdown(options=["none", "bearer", "api_key", "basic"], description="Auth:")
-    api_bearer_token = w.Password(description="Token:", disabled=True)
+    api_bearer_token = w.Password(description="Token:", disabled=True, placeholder="or {{secrets/scope/key}}")
     api_key_header = w.Text(description="Header name:", value="X-API-Key", disabled=True)
-    api_key_value = w.Password(description="Key:", disabled=True)
+    api_key_value = w.Password(description="Key:", disabled=True, placeholder="or {{secrets/scope/key}}")
     api_basic_user = w.Text(description="User:", disabled=True)
-    api_basic_password = w.Password(description="Password:", disabled=True)
+    api_basic_password = w.Password(description="Password:", disabled=True, placeholder="or {{secrets/scope/key}}")
     api_auth_box = w.VBox([api_bearer_token])
 
     def on_auth_type_change(change):
@@ -204,6 +204,24 @@ def launch():
     merge_keys = w.Text(description="Merge keys:", placeholder="id, updated_at (merge mode only)", disabled=True)
     schema_evo = w.Checkbox(value=True, description="Allow schema evolution")
     write_mode.observe(lambda c: setattr(merge_keys, "disabled", c["new"] != "merge"), names="value")
+
+    incremental_cb = w.Checkbox(
+        value=False,
+        description="Incremental (Auto Loader) — only ingest new files each run",
+    )
+    checkpoint_input = w.Text(
+        description="Checkpoint:",
+        placeholder="/Volumes/cat/schema/vol/_checkpoints/my_ingest",
+        disabled=True,
+    )
+    incremental_cb.observe(lambda c: setattr(checkpoint_input, "disabled", not c["new"]), names="value")
+    incremental_box = w.VBox([incremental_cb, checkpoint_input])
+
+    def on_kind_change_incremental(change):
+        incremental_box.layout.display = "none" if change["new"] in ("Database", "REST API") else ""
+
+    kind_toggle.observe(on_kind_change_incremental, names="value")
+    on_kind_change_incremental({"new": kind_toggle.value})
 
     test_btn = dashui.action_button("Test Connection", style="info")
     preview_btn = dashui.action_button("Preview", style="info")
@@ -373,6 +391,8 @@ def launch():
     def on_run(b):
         with output:
             output.clear_output()
+            run_btn.set_label("Running…")
+            run_btn.set_disabled(True)
             try:
                 from dashingest.connectors import IngestTarget
                 from dashingest.ingestor import run_ingestion
@@ -382,6 +402,8 @@ def launch():
                     write_mode=write_mode.value,
                     schema_evolution=schema_evo.value,
                     merge_keys=[k.strip() for k in merge_keys.value.split(",") if k.strip()],
+                    incremental=incremental_cb.value,
+                    checkpoint_location=checkpoint_input.value.strip(),
                 )
                 source = _build_source()
                 _save_state()
@@ -389,6 +411,9 @@ def launch():
                 result.display()
             except Exception as e:
                 print(f"Error: {e}")
+            finally:
+                run_btn.set_label("Run Ingestion")
+                run_btn.set_disabled(False)
 
     test_btn.on_click(on_test)
     preview_btn.on_click(on_preview)
@@ -405,7 +430,7 @@ def launch():
         kind_toggle, source_panel, format_row,
         w.HBox([test_btn, preview_btn]),
         dashui.section("Step 2: Target"),
-        target_table, write_mode, merge_keys, schema_evo,
+        target_table, write_mode, merge_keys, schema_evo, incremental_box,
         dashui.section("Step 3: Run"),
         run_btn, output,
     ])

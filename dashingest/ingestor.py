@@ -12,20 +12,31 @@ from dashingest.connectors import (
     RestApiSource,
     build_jdbc_url,
     jdbc_driver,
+    parse_secret_ref,
     resolve_format_and_options,
     resolve_path,
 )
 from dashingest.readers import ExcelReaderOptions, build_reader_options
 
+# Most JDBC engines accept a bare "SELECT 1"; Oracle requires FROM DUAL.
+_TEST_QUERY_FOR = {"oracle": "SELECT 1 AS connection_test FROM DUAL"}
+_DEFAULT_TEST_QUERY = "SELECT 1 AS connection_test"
+
+
+def test_query(engine: str) -> str:
+    """The lightweight validation query test_connection() runs for a given
+    JDBC engine — most engines accept a bare SELECT, Oracle needs FROM DUAL."""
+    return _TEST_QUERY_FOR.get(engine, _DEFAULT_TEST_QUERY)
+
 
 @dataclass
 class IngestResult:
     table: str
-    row_count: int
+    rows_ingested: int  # rows processed in this run, not the target table's total size
     write_mode: str
 
     def display(self) -> None:
-        print(f"Ingested into {self.table} ({self.write_mode}): {self.row_count:,} total rows")
+        print(f"Ingested into {self.table} ({self.write_mode}): {self.rows_ingested:,} rows this run")
 
 
 @dataclass
@@ -41,10 +52,56 @@ def run_ingestion(source, target: IngestTarget) -> IngestResult:
     from pyspark.sql import SparkSession
 
     spark = SparkSession.getActiveSession()
+    if target.incremental:
+        return _run_incremental(source, target, spark)
     df = _load(source, spark)
+    rows = df.count()
     _write(df, target, spark)
-    count = spark.table(target.table).count()
-    return IngestResult(target.table, count, target.write_mode)
+    return IngestResult(target.table, rows, target.write_mode)
+
+
+def _run_incremental(source, target: IngestTarget, spark) -> IngestResult:
+    """Auto Loader (cloudFiles) ingestion — only picks up files not already
+    seen, instead of re-reading the whole source on every run."""
+    if isinstance(source, (DatabaseSource, RestApiSource)):
+        raise ValueError(
+            "incremental=True is only supported for path-based sources "
+            "(Volume/ADLS/S3/DBFS) — Database/REST API sources always read fresh."
+        )
+    if target.write_mode == "merge":
+        raise ValueError(
+            "incremental=True doesn't support write_mode='merge' — Auto Loader "
+            "appends to the target table; run a downstream MERGE from there if "
+            "you need dedup."
+        )
+    if not target.checkpoint_location:
+        raise ValueError(
+            "incremental=True requires target.checkpoint_location (a Volume/DBFS "
+            "path Auto Loader uses for its checkpoint + schema state)."
+        )
+
+    spark_format, options = resolve_format_and_options(source)
+    reader = (
+        spark.readStream.format("cloudFiles")
+        .option("cloudFiles.format", spark_format)
+        .option("cloudFiles.schemaLocation", target.checkpoint_location)
+    )
+    for key, value in options.items():
+        reader = reader.option(key, value)
+    df = reader.load(resolve_path(source))
+
+    writer = (
+        df.writeStream.format("delta")
+        .option("checkpointLocation", target.checkpoint_location)
+        .trigger(availableNow=True)
+    )
+    if target.schema_evolution:
+        writer = writer.option("mergeSchema", "true")
+    query = writer.toTable(target.table)
+    query.awaitTermination()
+
+    rows = sum(p.get("numInputRows", 0) for p in query.recentProgress)
+    return IngestResult(target.table, rows, "incremental (Auto Loader)")
 
 
 def preview(source, limit: int = 10):
@@ -70,7 +127,7 @@ def test_connection(source) -> ConnectionTestResult:
 
 def _test_database_connection(source: DatabaseSource, spark) -> ConnectionTestResult:
     try:
-        reader = _jdbc_reader(source, spark).option("dbtable", "(SELECT 1 AS connection_test) t")
+        reader = _jdbc_reader(source, spark).option("dbtable", f"({test_query(source.engine)}) t")
         reader.load().take(1)
         return ConnectionTestResult(True, f"Connected to {source.engine} at {source.host or build_jdbc_url(source)}")
     except Exception as e:
@@ -150,13 +207,37 @@ def _load_excel_sheets(source, spark):
     return reduce(lambda left, right: left.unionByName(right), dfs)
 
 
+def _resolve_secret(value: str) -> str:
+    """Resolve a `{{secrets/scope/key}}` reference via dbutils.secrets.get;
+    returns `value` unchanged if it isn't a secret reference."""
+    ref = parse_secret_ref(value)
+    if ref is None:
+        return value
+    dbutils = _get_dbutils()
+    if dbutils is None:
+        raise RuntimeError(f"Cannot resolve secret reference {value!r} outside Databricks")
+    scope, key = ref
+    return dbutils.secrets.get(scope=scope, key=key)
+
+
+def _get_dbutils():
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+        if shell and hasattr(shell, "user_ns") and "dbutils" in shell.user_ns:
+            return shell.user_ns["dbutils"]
+    except Exception:
+        pass
+    return None
+
+
 def _jdbc_reader(source: DatabaseSource, spark):
     reader = (
         spark.read.format("jdbc")
         .option("url", build_jdbc_url(source))
         .option("driver", jdbc_driver(source))
         .option("user", source.user)
-        .option("password", source.password)
+        .option("password", _resolve_secret(source.password))
     )
     if source.fetch_size:
         reader = reader.option("fetchsize", source.fetch_size)
@@ -185,15 +266,15 @@ def _load_database(source: DatabaseSource, spark):
 def _rest_auth_headers(source: RestApiSource) -> dict:
     headers = dict(source.headers)
     if source.auth_type == "bearer" and source.bearer_token:
-        headers["Authorization"] = f"Bearer {source.bearer_token}"
+        headers["Authorization"] = f"Bearer {_resolve_secret(source.bearer_token)}"
     elif source.auth_type == "api_key" and source.api_key:
-        headers[source.api_key_header] = source.api_key
+        headers[source.api_key_header] = _resolve_secret(source.api_key)
     return headers
 
 
 def _rest_basic_auth(source: RestApiSource):
     if source.auth_type == "basic" and source.basic_user:
-        return (source.basic_user, source.basic_password)
+        return (source.basic_user, _resolve_secret(source.basic_password))
     return None
 
 
